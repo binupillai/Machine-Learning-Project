@@ -1,0 +1,189 @@
+---
+title: "Machine Learning Project"
+author: "Binu Pillai"
+date: "March 19, 2015"
+output: html_document
+---
+
+## Executive Summary
+The goal of this project is to predict how well 6 different people performed barbell lifts utilizing data collected from activity monitoring devices. Each of the 6 people were asked to perform the barbell lifts correctly and incorrect 5 different ways. Utilizing the activity monitor device data, a machine learning model is to be generated using a training set with class labels representing the 6 ways of performing the barbell lifts (supervised learning). Once the models are built, the generalization performance should be assessed, and then the training model is to be applied to a new set of testing data to make predictions. 
+
+##Input Data
+The input data consisted of various movement measurments including acceleration components of the arms and pitch and roll orientations of the dumbell collected using devices such as Jawbone Up, Nike FuelBand, and Fitbit . 
+
+The original data was taken from the originating study linked below. Please see the site and associated paper for more information. 
+http://groupware.les.inf.puc-rio.br/har
+
+## Data Analysis
+First of all load the R packages that makes the analysis easir.
+
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+
+set.seed(12345)
+```
+## Getting the data
+Assume that training data set and testing data set are already dowmloaded from the following URL to current working directory.
+
+Testing Data Set URL :-> http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+Training Data Set URL :-> http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+```{r}
+training.data <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing.data <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+```
+##Partioning the training set into two
+
+Partioning Training data set into two data sets (60% training and 40% testing).
+  
+```{r}
+new.train.data <- createDataPartition(y=training.data$classe, p=0.6, list=FALSE)
+my.training <- training.data[new.train.data, ]
+my.testing <- training.data[-new.train.data, ]
+
+dim(my.training)
+dim(my.testing)
+```
+
+## Cleaning the data
+
+Transformation 2:Cleaning data by eliminating NearZeroValidable
+
+```{r}
+myDataNZV <- nearZeroVar(my.training, saveMetrics=TRUE)
+
+NZV.vars <- names(my.training) %in% c("new_window", "kurtosis_roll_belt", "kurtosis_picth_belt",
+                                      "kurtosis_yaw_belt", "skewness_roll_belt", "skewness_roll_belt.1", "skewness_yaw_belt",
+                                      "max_yaw_belt", "min_yaw_belt", "amplitude_yaw_belt", "avg_roll_arm", "stddev_roll_arm",
+                                      "var_roll_arm", "avg_pitch_arm", "stddev_pitch_arm", "var_pitch_arm", "avg_yaw_arm",
+                                      "stddev_yaw_arm", "var_yaw_arm", "kurtosis_roll_arm", "kurtosis_picth_arm",
+                                      "kurtosis_yaw_arm", "skewness_roll_arm", "skewness_pitch_arm", "skewness_yaw_arm",
+                                      "max_roll_arm", "min_roll_arm", "min_pitch_arm", "amplitude_roll_arm", "amplitude_pitch_arm",
+                                      "kurtosis_roll_dumbbell", "kurtosis_picth_dumbbell", "kurtosis_yaw_dumbbell", "skewness_roll_dumbbell",
+                                      "skewness_pitch_dumbbell", "skewness_yaw_dumbbell", "max_yaw_dumbbell", "min_yaw_dumbbell",
+                                      "amplitude_yaw_dumbbell", "kurtosis_roll_forearm", "kurtosis_picth_forearm", "kurtosis_yaw_forearm",
+                                      "skewness_roll_forearm", "skewness_pitch_forearm", "skewness_yaw_forearm", "max_roll_forearm",
+                                      "max_yaw_forearm", "min_roll_forearm", "min_yaw_forearm", "amplitude_roll_forearm",
+                                      "amplitude_yaw_forearm", "avg_roll_forearm", "stddev_roll_forearm", "var_roll_forearm",
+                                      "avg_pitch_forearm", "stddev_pitch_forearm", "var_pitch_forearm", "avg_yaw_forearm",
+                                      "stddev_yaw_forearm", "var_yaw_forearm")
+my.training <- my.training[!NZV.vars]
+
+dim(my.training)
+```
+
+Transformation 2: Removing first ID variable
+  
+```{r}
+my.training <- my.training[c(-1)]
+```
+
+Transformation 3: Cleaning Variables with too many NAs.
+
+```{r}
+new.training <- my.training 
+for(i in 1:length(my.training)) { 
+  if( sum( is.na( my.training[, i] ) ) /nrow(my.training) >= .6 ) { 
+    for(j in 1:length(new.training)) {
+      if( length( grep(names(my.training[i]), names(new.training)[j]) ) ==1)  { 
+        new.training <- new.training[ , -j] 
+      }  
+    } 
+  }
+}
+
+dim(new.training)
+
+my.training <- new.training
+rm(new.training)
+```
+
+Now let us do the exact same 3 transformations but for our myTesting and testing data sets.
+
+```{r}
+clean.set1 <- colnames(my.training)
+clean.set2 <- colnames(my.training[, -58]) 
+my.testing <- my.testing[clean.set1]
+testing.data <- testing.data[clean.set2]
+
+dim(my.testing)
+dim(testing.data)
+```
+
+In order to ensure proper functioning of Decision Trees and especially RandomForest Algorithm with the Test data set (data set provided), we need to coerce the data into the same type.
+
+```{r}
+for (i in 1:length(testing.data) ) {
+  for(j in 1:length(my.training)) {
+    if( length( grep(names(my.training[i]), names(testing.data)[j]) ) ==1)  {
+      class(testing.data[j]) <- class(my.training[i])
+    }      
+  }      
+}
+
+testing.data <- rbind(my.training[2, -58] , testing.data)
+testing.data <- testing.data[-1,]
+```
+
+## Using ML algorithms for prediction: Decision Tree
+
+```{r}
+modFitA1 <- rpart(classe ~ ., data=my.training, method="class")
+
+fancyRpartPlot(modFitA1)
+```
+
+Predicting:
+  
+```{r}
+predictionsA1 <- predict(modFitA1, my.testing, type = "class")
+```
+
+Using confusion Matrix to test results:
+```{r}
+confusionMatrix(predictionsA1, my.testing$classe)
+
+```
+
+## Using ML algorithms for prediction: Random Forests
+
+```{r}
+modFitB1 <- randomForest(classe ~. , data=my.training)
+```
+
+Predicting:
+
+```{r}
+predictionsB1 <- predict(modFitB1, my.testing, type = "class")
+```
+Using confusion Matrix to test results:
+```{r}
+confusionMatrix(predictionsB1, my.testing$classe)
+```
+Random Forests yielded better results.
+  
+## Generating Files to submit as answers for the Assignment:
+
+```{r}
+predictionsB2 <- predict(modFitB1, testing.data, type = "class")
+```
+
+Generating files with predictions to submit for assignment.
+```{r}
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predictionsB2)
+```
